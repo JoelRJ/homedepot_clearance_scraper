@@ -1,15 +1,15 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 import math
-
 import logging
-
 import openpyxl
 from openpyxl import Workbook
 from datetime import datetime
+import json
 
 # The number of cents is the number of weeks from the date on the clearance tag until the next markdown. .03 means three weeks.
 
@@ -82,7 +82,7 @@ def extract_clearance_links(html):
 
     return links
 
-def find_clearance():
+def find_clearance(driver):
     wait_random_time(2, 4)
     try:
         elements = driver.find_elements(By.XPATH, '//span[contains(text(), "See In-Store Clearance Price")]')
@@ -120,7 +120,7 @@ def find_clearance():
     except:
         pass
 
-def next_page():
+def next_page(driver):
     scroll_down_counter = 0
     scroll_up_counter = 0
     scroll_0_0_counter = 0
@@ -158,72 +158,11 @@ def next_page():
     # Scroll to top of page
     driver.execute_script("window.scrollTo(0, 0)")
 
-search_terms = {
-    'dewalt': 7, 
-    'makita': 7, 
-    'milwaukee': 7, 
-    'bosch': 5, 
-    'ridgid': 4, 
-    'fiskars': 1,
-    'storage shed': 2, 
-    'water heater': 2, 
-    'cleaning supplies': 3,
-    'lawn mower': 2,
-    'ladders': 1,
-    'air compressor': 1,
-    'grills': 2,
-    'patio furniture': 2,
-    'ceiling fan': 2,
-    'light fixtures': 2,
-    'bathroom vanity': 2,
-    'painting': 2,
-    'paint sprayers': 3,
-    'garage epoxy': 2,
-    'flooring': 2,
-    'tile': 2,
-    'carpet': 2,
-    'electronics': 2,
-    'appliances': 2,
-    'glue': 2,
-    'grills': 2,
-    'patio furniture': 2,
-    'griddle': 2,
-    'pest control': 2,
-    'weed killer': 2,
-    'garage': 2,
-    'google': 2,
-    'smart home': 2,
-    'google nest': 2,
-    'concrete mixers': 2,
-}
+def process_store(store):
+    driver = webdriver.Chrome()
+    logger = setup_logger()
+    clearance_logger = setup_clearance_logger()
 
-hd_stores = [
-    4409, # Sandy
-    4408, # Centerville
-    4406, # W Valley City
-    4416, # Provo
-    4461, # Saragota Springs
-    4407, # Lindon
-    4417, # American Fork
-    4421, # E Sandy
-    4409, # Sandy
-    4410, # W Jordan
-    # 4415, Park City
-    4412, # St George
-    4420, # W St George
-    4418, # Cedar City
-]
-
-find_all_prices = input('Be slow?\n')
-find_all_prices = True if find_all_prices.lower() == 'y' else False
-
-driver = webdriver.Chrome()
-
-logger = setup_logger()
-clearance_logger = setup_clearance_logger()
-
-
-for store in hd_stores:
     logger.info(f'-------------------------- Searching for store { store } --------------------------')
 
     while True:
@@ -316,7 +255,7 @@ for store in hd_stores:
             
             wait_random_time(2, 3)
             try:
-                driver.find_element(By.LINK_TEXT, 'In Stock at Store Today').click()
+                driver.find_element(By.PARTIAL_LINK_TEXT, 'at Store Today').click()
                 logger.info(f'#{ store } - Clicked on In Stock at Store Today')
                 break 
             except:
@@ -360,13 +299,13 @@ for store in hd_stores:
             # Comment this loop out to speed up the process
             if (find_all_prices):
                 for _ in range(0, 7):
-                    result = find_clearance()
+                    result = find_clearance(driver)
 
                     if result:
                         new_sale_items.update(result)
                         should_break = True
 
-                    result = find_clearance()
+                    result = find_clearance(driver)
                     if result:
                         new_sale_items.update(result)
                     else:
@@ -391,6 +330,42 @@ for store in hd_stores:
             store_sale_items.update(new_sale_items)
             
             logger.info(f'#{ store } - Moving to next page')
-            next_page()
+            next_page(driver)
             logger.info(f'#{ store } - Moved to next page')
             wait_random_time(2, 3)
+    
+    driver.quit()
+
+# Main script
+if __name__ == "__main__":
+    find_all_prices = input('Scrape prices?\n')
+    find_all_prices = True if find_all_prices.lower() == 'y' else False
+
+    hd_stores = [
+        4409, # Sandy
+        4408, # Centerville
+        4406, # W Valley City
+        4416, # Provo
+        4461, # Saragota Springs
+        4407, # Lindon
+        4417, # American Fork
+        4421, # E Sandy
+        4409, # Sandy
+        4410, # W Jordan
+        # 4415, # Park City
+        # 4412, # St George
+        # 4420, # W St George
+        4418, # Cedar City
+    ]
+
+    # Load the search terms
+    with open('search_terms.json', 'r') as file:
+        search_terms = json.load(file)
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(process_store, store) for store in hd_stores]
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                print(f"An error occurred: {str(e)}")
